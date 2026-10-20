@@ -48,6 +48,12 @@ import { useMoodRatingsSupport } from '../hooks/useMoodRatingsSupport';
 import { usePreferences } from '../hooks/usePreferences';
 import { getApiErrorMessage } from '../services/api/errors';
 import type { MoodEntry } from '../services/api/moodApi';
+import {
+  hasShownCheckinReminderOffer,
+  markCheckinReminderOfferShown,
+} from '../services/checkinReminderOffer';
+import { requestNotificationPermission } from '../services/notifications';
+import { useAppPreferencesStore } from '../stores/appPreferencesStore';
 import { getDeviceTimezone, getTodayDate } from '../utils/dateUtils';
 import {
   formatTimeLabel,
@@ -263,6 +269,38 @@ function LegacyMoodLog({
   const isToday = targetDate === getTodayDate();
   const entryReady = !entryLoading && !entryError;
 
+  // Offered once per device after a check-in, only when the master toggle is
+  // on and reminders are off. Never blocks navigation.
+  const offerCheckinReminders = async () => {
+    const prefs = useAppPreferencesStore.getState();
+    if (!prefs.notificationsEnabled || prefs.checkinRemindersEnabled) return;
+    if (await hasShownCheckinReminderOffer()) return;
+    await markCheckinReminderOfferShown();
+    Alert.alert(
+      t('mood.reminderOfferTitle', { defaultValue: 'Remind me daily?' }),
+      t('mood.reminderOfferBody', {
+        defaultValue:
+          'Get a reminder each evening to check in. You can change the time or add more in Settings → Notifications.',
+      }),
+      [
+        {
+          text: t('common.notNow', { defaultValue: 'Not now' }),
+          style: 'cancel',
+        },
+        {
+          text: t('mood.reminderOfferAccept', { defaultValue: 'Remind me' }),
+          onPress: async () => {
+            if ((await requestNotificationPermission()) === 'granted') {
+              const store = useAppPreferencesStore.getState();
+              store.setCheckinReminderTimes(['20:30']);
+              store.setCheckinRemindersEnabled(true);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleSave = async () => {
     if (!entryReady || saveMood.isPending) return;
     const sendEnergy = showRatings && energyOverride !== undefined;
@@ -287,6 +325,7 @@ function LegacyMoodLog({
         }),
       });
     }
+    await offerCheckinReminders();
     navigation.goBack();
   };
 
