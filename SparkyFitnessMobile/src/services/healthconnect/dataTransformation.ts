@@ -722,6 +722,12 @@ const DIRECT_TRANSFORMERS: Record<string, DirectTransformer> = {
       awake_sleep_seconds: awakeSeconds,
       ...extractTimezoneMetadata(rec, true),
     };
+    if (typeof rec.avg_overnight_hrv === 'number') {
+      sleepSession.avg_overnight_hrv = rec.avg_overnight_hrv;
+    }
+    if (typeof rec.resting_heart_rate === 'number') {
+      sleepSession.resting_heart_rate = rec.resting_heart_rate;
+    }
     output.push(sleepSession);
   },
 

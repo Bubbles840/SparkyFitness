@@ -15,6 +15,7 @@ import {
   type HCZoneOffset,
   type ReadResult,
 } from '../../types/healthRecords';
+import { toLocalDateString } from '../../utils/dateUtils';
 import { ceilToLocalDayStart, getSyncStartDate } from '../../utils/syncUtils';
 import {
   isClientUnavailableError,
@@ -1440,6 +1441,184 @@ export const isPlausibleSessionDistance = (
 ): boolean => {
   if (durationMs <= MIN_DURATION_FOR_DISTANCE_CHECK_MS) return true;
   return meters >= MIN_DISTANCE_FOR_LONG_SESSION_M;
+};
+
+// Health Connect SleepStageType values that count as asleep: SLEEPING, SLEEPING_LIGHT, SLEEPING_DEEP, SLEEPING_REM.
+const ASLEEP_STAGE_VALUES = new Set([2, 4, 5, 6]);
+
+interface SleepEnrichmentWindow {
+  startMs: number;
+  endMs: number;
+  wakeDay: string;
+  asleepMs: number;
+}
+
+const sleepEnrichmentWindow = (
+  record: unknown
+): SleepEnrichmentWindow | null => {
+  const rec = record as {
+    startTime?: unknown;
+    endTime?: unknown;
+    stages?: { startTime: string; endTime: string; stage: number }[];
+  };
+  if (typeof rec.startTime !== 'string' || typeof rec.endTime !== 'string') {
+    return null;
+  }
+  const startMs = Date.parse(rec.startTime);
+  const endMs = Date.parse(rec.endTime);
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    endMs <= startMs
+  ) {
+    return null;
+  }
+  let asleepMs = 0;
+  for (const stage of rec.stages ?? []) {
+    if (!ASLEEP_STAGE_VALUES.has(stage.stage)) continue;
+    const stageMs = Date.parse(stage.endTime) - Date.parse(stage.startTime);
+    if (Number.isFinite(stageMs) && stageMs > 0) asleepMs += stageMs;
+  }
+  return {
+    startMs,
+    endMs,
+    wakeDay: toLocalDateString(rec.endTime),
+    asleepMs: asleepMs > 0 ? asleepMs : endMs - startMs,
+  };
+};
+
+/** Records of a read, or [] with a debug log when the read failed or was denied. */
+const readOptionalSleepBiometric = async (
+  recordType: string,
+  start: Date,
+  end: Date
+): Promise<unknown[]> => {
+  const { records, error } = await readHealthRecordsDetailed(
+    recordType,
+    start,
+    end
+  );
+  if (error) {
+    addLog(
+      `[HealthConnectService] Skipping ${recordType} for sleep enrichment: ${error}`,
+      'DEBUG'
+    );
+    return [];
+  }
+  return records;
+};
+
+/**
+ * Attaches overnight HRV (RMSSD mean inside the wake day's longest sleep
+ * session, 1 decimal) and the wake day's latest resting heart rate to every
+ * sleep session of that wake day. Failed, empty or unpermitted reads leave the
+ * fields unset and never fail the sync.
+ */
+export const enrichSleepSessions = async (
+  records: unknown[],
+  telemetry: TelemetryRunContext
+): Promise<unknown[]> => {
+  void telemetry;
+  if (records.length === 0) return records;
+
+  try {
+    const windows = records.map(sleepEnrichmentWindow);
+    const valid = windows.filter((w): w is SleepEnrichmentWindow => w !== null);
+    if (valid.length === 0) return records;
+
+    const primaryByDay = new Map<string, SleepEnrichmentWindow>();
+    for (const w of valid) {
+      const current = primaryByDay.get(w.wakeDay);
+      if (!current || w.asleepMs > current.asleepMs) {
+        primaryByDay.set(w.wakeDay, w);
+      }
+    }
+
+    const minStartMs = Math.min(...valid.map((w) => w.startMs));
+    const maxEndMs = Math.max(...valid.map((w) => w.endMs));
+    const days = [...primaryByDay.keys()].sort();
+    const firstDay = days[0].split('-').map(Number);
+    const lastDay = days[days.length - 1].split('-').map(Number);
+
+    const [hrvRecords, rhrRecords] = await Promise.all([
+      readOptionalSleepBiometric(
+        'HeartRateVariabilityRmssd',
+        new Date(minStartMs),
+        new Date(maxEndMs)
+      ),
+      readOptionalSleepBiometric(
+        'RestingHeartRate',
+        new Date(firstDay[0], firstDay[1] - 1, firstDay[2], 0, 0, 0, 0),
+        new Date(lastDay[0], lastDay[1] - 1, lastDay[2], 23, 59, 59, 999)
+      ),
+    ]);
+
+    const hrvReadings = hrvRecords.flatMap((r) => {
+      const rec = r as { time?: unknown; heartRateVariabilityMillis?: unknown };
+      const ms = typeof rec.time === 'string' ? Date.parse(rec.time) : NaN;
+      const value = rec.heartRateVariabilityMillis;
+      return Number.isFinite(ms) &&
+        typeof value === 'number' &&
+        Number.isFinite(value) &&
+        value > 0
+        ? [{ ms, value }]
+        : [];
+    });
+
+    const latestRhrByDay = new Map<string, { ms: number; value: number }>();
+    for (const r of rhrRecords) {
+      const rec = r as { time?: unknown; beatsPerMinute?: unknown };
+      const ms = typeof rec.time === 'string' ? Date.parse(rec.time) : NaN;
+      const value = rec.beatsPerMinute;
+      if (
+        !Number.isFinite(ms) ||
+        typeof value !== 'number' ||
+        !Number.isFinite(value) ||
+        value <= 0
+      ) {
+        continue;
+      }
+      const day = toLocalDateString(new Date(ms));
+      const current = latestRhrByDay.get(day);
+      if (!current || ms > current.ms) latestRhrByDay.set(day, { ms, value });
+    }
+
+    const biometricsByDay = new Map<
+      string,
+      { avg_overnight_hrv?: number; resting_heart_rate?: number }
+    >();
+    for (const [day, primary] of primaryByDay) {
+      const inWindow = hrvReadings.filter(
+        (h) => h.ms >= primary.startMs && h.ms <= primary.endMs
+      );
+      const biometrics: {
+        avg_overnight_hrv?: number;
+        resting_heart_rate?: number;
+      } = {};
+      if (inWindow.length > 0) {
+        const mean =
+          inWindow.reduce((sum, h) => sum + h.value, 0) / inWindow.length;
+        biometrics.avg_overnight_hrv = Math.round(mean * 10) / 10;
+      }
+      const rhr = latestRhrByDay.get(day);
+      if (rhr) biometrics.resting_heart_rate = rhr.value;
+      biometricsByDay.set(day, biometrics);
+    }
+
+    return records.map((record, i) => {
+      const w = windows[i];
+      const biometrics = w ? biometricsByDay.get(w.wakeDay) : undefined;
+      return biometrics && Object.keys(biometrics).length > 0
+        ? { ...(record as Record<string, unknown>), ...biometrics }
+        : record;
+    });
+  } catch (error) {
+    addLog(
+      `[HealthConnectService] Sleep HRV/RHR enrichment skipped: ${getErrorMessage(error)}`,
+      'DEBUG'
+    );
+    return records;
+  }
 };
 
 /**
