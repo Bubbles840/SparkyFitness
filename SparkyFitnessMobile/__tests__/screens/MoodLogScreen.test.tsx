@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -254,8 +255,14 @@ describe('MoodLogScreen daily reminder offer', () => {
     await buttons.find((b) => b.text === 'Remind me')?.onPress?.();
   };
 
+  const initialPrefs = useAppPreferencesStore.getState();
+
   beforeAll(async () => {
     await initializeI18n('en');
+  });
+
+  afterEach(() => {
+    useAppPreferencesStore.setState(initialPrefs, true);
   });
 
   beforeEach(() => {
@@ -273,6 +280,9 @@ describe('MoodLogScreen daily reminder offer', () => {
     renderScreen();
     await pressSave();
     await waitFor(() => expect(mockNavigation.goBack).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   };
 
   it('offers reminders once after the first check-in and marks it shown', async () => {
@@ -313,6 +323,35 @@ describe('MoodLogScreen daily reminder offer', () => {
     (requestNotificationPermission as jest.Mock).mockResolvedValue('denied');
     await save();
     await remindMe();
+    expect(useAppPreferencesStore.getState().checkinRemindersEnabled).toBe(
+      false
+    );
+  });
+
+  it('still leaves the screen when reading the offer flag fails', async () => {
+    (hasShownCheckinReminderOffer as jest.Mock).mockRejectedValue(
+      new Error('storage')
+    );
+    await save();
+    expect(mockNavigation.goBack).toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('leaves the screen without waiting for the offer flag', async () => {
+    (hasShownCheckinReminderOffer as jest.Mock).mockReturnValue(
+      new Promise(() => {})
+    );
+    renderScreen();
+    await pressSave();
+    await waitFor(() => expect(mockNavigation.goBack).toHaveBeenCalled());
+  });
+
+  it('leaves reminders off when the permission request throws', async () => {
+    (requestNotificationPermission as jest.Mock).mockRejectedValue(
+      new Error('boom')
+    );
+    await save();
+    await expect(remindMe()).resolves.toBeUndefined();
     expect(useAppPreferencesStore.getState().checkinRemindersEnabled).toBe(
       false
     );
