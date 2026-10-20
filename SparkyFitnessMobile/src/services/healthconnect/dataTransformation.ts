@@ -487,7 +487,9 @@ const EXERCISE_TYPE_OTHER_WORKOUT = 0;
 
 // Health Connect SleepStageType constants from react-native-health-connect.
 // We skip UNKNOWN values so they do not distort asleep-time totals downstream.
-const mapHealthConnectSleepStage = (stage: number): SleepStageType | null => {
+export const mapHealthConnectSleepStage = (
+  stage: number
+): SleepStageType | null => {
   switch (stage) {
     case 1:
       return 'awake';

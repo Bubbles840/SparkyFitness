@@ -1,4 +1,7 @@
-import { readRecords } from 'react-native-health-connect';
+import {
+  getGrantedPermissions,
+  readRecords,
+} from 'react-native-health-connect';
 import { enrichSleepSessions } from '../../../src/services/healthconnect';
 import { postProcessRaw } from '../../../src/services/healthconnect/provider';
 import { createTelemetryRunContext } from '../../../src/services/shared/telemetryBudget';
@@ -9,6 +12,14 @@ jest.mock('../../../src/services/LogService', () => ({
 }));
 
 const mockReadRecords = readRecords as jest.Mock;
+const mockGetGrantedPermissions = getGrantedPermissions as jest.Mock;
+
+const grant = (...recordTypes: string[]) =>
+  mockGetGrantedPermissions.mockResolvedValue(
+    recordTypes.map((recordType) => ({ accessType: 'read', recordType }))
+  );
+const readsOf = (recordType: string) =>
+  mockReadRecords.mock.calls.filter(([type]) => type === recordType);
 
 type ReadOutcome = { records: unknown[] } | Error;
 
@@ -49,6 +60,7 @@ const enrich = (records: unknown[]) =>
 describe('enrichSleepSessions', () => {
   beforeEach(() => {
     mockReadRecords.mockReset();
+    grant('HeartRateVariabilityRmssd', 'RestingHeartRate');
   });
 
   test('averages only HRV readings inside the session window', async () => {
@@ -105,6 +117,8 @@ describe('enrichSleepSessions', () => {
     const [session] = await enrich([mainSleep()]);
     expect(session.avg_overnight_hrv).toBeUndefined();
     expect(session.resting_heart_rate).toBe(57);
+    expect(readsOf('HeartRateVariabilityRmssd')).toHaveLength(1);
+    expect(readsOf('RestingHeartRate')).toHaveLength(1);
   });
 
   test('returns records unchanged when both reads fail', async () => {
@@ -117,6 +131,81 @@ describe('enrichSleepSessions', () => {
     expect(result).toEqual([mainSleep()]);
     expect(result[0]).not.toHaveProperty('avg_overnight_hrv');
     expect(result[0]).not.toHaveProperty('resting_heart_rate');
+    expect(readsOf('HeartRateVariabilityRmssd')).toHaveLength(1);
+    expect(readsOf('RestingHeartRate')).toHaveLength(1);
+  });
+
+  test('does not read a record type without a read grant', async () => {
+    grant('SleepSession', 'RestingHeartRate');
+    setReads({
+      HeartRateVariabilityRmssd: { records: [hrv('2026-10-15', '02:00', 50)] },
+      RestingHeartRate: { records: [rhr('2026-10-15', '09:00', 57)] },
+    });
+    const [session] = await enrich([mainSleep()]);
+    expect(readsOf('HeartRateVariabilityRmssd')).toHaveLength(0);
+    expect(session.avg_overnight_hrv).toBeUndefined();
+    expect(session.resting_heart_rate).toBe(57);
+  });
+
+  test('skips both reads when permissions cannot be fetched', async () => {
+    mockGetGrantedPermissions.mockRejectedValue(new Error('boom'));
+    const [session] = await enrich([mainSleep()]);
+    expect(mockReadRecords).not.toHaveBeenCalled();
+    expect(session).not.toHaveProperty('avg_overnight_hrv');
+  });
+
+  test('picks the session with the most asleep time as primary', async () => {
+    const longMostlyAwake = {
+      startTime: atLocalTime('2026-10-14', '22:00'),
+      endTime: atLocalTime('2026-10-15', '06:00'),
+      stages: [
+        {
+          startTime: atLocalTime('2026-10-14', '22:00'),
+          endTime: atLocalTime('2026-10-15', '03:00'),
+          stage: 1,
+        },
+        {
+          startTime: atLocalTime('2026-10-15', '03:00'),
+          endTime: atLocalTime('2026-10-15', '06:00'),
+          stage: 4,
+        },
+      ],
+    };
+    const shorterMoreAsleep = {
+      startTime: atLocalTime('2026-10-15', '06:30'),
+      endTime: atLocalTime('2026-10-15', '11:30'),
+      stages: [
+        {
+          startTime: atLocalTime('2026-10-15', '06:30'),
+          endTime: atLocalTime('2026-10-15', '11:30'),
+          stage: 5,
+        },
+      ],
+    };
+    setReads({
+      HeartRateVariabilityRmssd: {
+        records: [
+          hrv('2026-10-15', '04:00', 30),
+          hrv('2026-10-15', '08:00', 60),
+        ],
+      },
+    });
+    const result = await enrich([longMostlyAwake, shorterMoreAsleep]);
+    expect(result[0].avg_overnight_hrv).toBe(60);
+    expect(result[1].avg_overnight_hrv).toBe(60);
+  });
+
+  test('ignores a resting heart rate dated to the next local day', async () => {
+    setReads({
+      RestingHeartRate: {
+        records: [
+          rhr('2026-10-15', '09:00', 57),
+          rhr('2026-10-16', '08:00', 50),
+        ],
+      },
+    });
+    const [session] = await enrich([mainSleep()]);
+    expect(session.resting_heart_rate).toBe(57);
   });
 
   test('postProcessRaw enriches SleepSession records', async () => {

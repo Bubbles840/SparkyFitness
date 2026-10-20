@@ -16,6 +16,7 @@ import {
   type ReadResult,
 } from '../../types/healthRecords';
 import { toLocalDateString } from '../../utils/dateUtils';
+import { mapHealthConnectSleepStage } from './dataTransformation';
 import { ceilToLocalDayStart, getSyncStartDate } from '../../utils/syncUtils';
 import {
   isClientUnavailableError,
@@ -1443,9 +1444,6 @@ export const isPlausibleSessionDistance = (
   return meters >= MIN_DISTANCE_FOR_LONG_SESSION_M;
 };
 
-// Health Connect SleepStageType values that count as asleep: SLEEPING, SLEEPING_LIGHT, SLEEPING_DEEP, SLEEPING_REM.
-const ASLEEP_STAGE_VALUES = new Set([2, 4, 5, 6]);
-
 interface SleepEnrichmentWindow {
   startMs: number;
   endMs: number;
@@ -1473,39 +1471,82 @@ const sleepEnrichmentWindow = (
   ) {
     return null;
   }
+  // Same "asleep" definition as the SleepSession transformer: light, deep and
+  // REM stages only, falling back to the duration when no stage is recognised.
   let asleepMs = 0;
+  let hasRecognizedStages = false;
   for (const stage of rec.stages ?? []) {
-    if (!ASLEEP_STAGE_VALUES.has(stage.stage)) continue;
+    const stageType = mapHealthConnectSleepStage(stage.stage);
+    if (!stageType) continue;
     const stageMs = Date.parse(stage.endTime) - Date.parse(stage.startTime);
-    if (Number.isFinite(stageMs) && stageMs > 0) asleepMs += stageMs;
+    if (!Number.isFinite(stageMs) || stageMs <= 0) continue;
+    hasRecognizedStages = true;
+    if (stageType !== 'awake') asleepMs += stageMs;
   }
   return {
     startMs,
     endMs,
     wakeDay: toLocalDateString(rec.endTime),
-    asleepMs: asleepMs > 0 ? asleepMs : endMs - startMs,
+    asleepMs: hasRecognizedStages ? asleepMs : endMs - startMs,
   };
 };
 
-/** Records of a read, or [] with a debug log when the read failed or was denied. */
+/**
+ * Records of an optional read, or [] with a debug log when the read was not
+ * granted or failed. Uses a single paged read with no day/hour window fallback and no ERROR/WARNING logging:
+ * an unpermitted or failing read must cost one native call, not a split storm.
+ */
 const readOptionalSleepBiometric = async (
   recordType: string,
+  granted: ReadonlySet<string>,
   start: Date,
   end: Date
 ): Promise<unknown[]> => {
-  const { records, error } = await readHealthRecordsDetailed(
-    recordType,
-    start,
-    end
-  );
-  if (error) {
+  if (!granted.has(recordType)) {
     addLog(
-      `[HealthConnectService] Skipping ${recordType} for sleep enrichment: ${error}`,
+      `[HealthConnectService] Skipping ${recordType} for sleep enrichment: read permission not granted`,
       'DEBUG'
     );
     return [];
   }
-  return records;
+  const records: unknown[] = [];
+  try {
+    let pageToken: string | undefined;
+    let page = 0;
+    do {
+      page++;
+      const options: ReadRecordsOptions = {
+        timeRangeFilter: {
+          operator: 'between',
+          startTime: start.toISOString(),
+          endTime: end.toISOString(),
+        },
+        pageSize: PAGE_SIZE,
+      };
+      if (pageToken) options.pageToken = pageToken;
+      const result = await readRecords(
+        recordType as Parameters<typeof readRecords>[0],
+        options as unknown as Parameters<typeof readRecords>[1]
+      );
+      records.push(...(result.records || []));
+      pageToken = result.pageToken;
+    } while (pageToken && page < MAX_PAGES);
+    if (pageToken) {
+      // A truncated window would bias the mean/latest value; leave it unset.
+      addLog(
+        `[HealthConnectService] Skipping ${recordType} for sleep enrichment: too many pages`,
+        'DEBUG'
+      );
+      return [];
+    }
+    return records;
+  } catch (error) {
+    addLog(
+      `[HealthConnectService] Skipping ${recordType} for sleep enrichment: ${getErrorMessage(error)}`,
+      'DEBUG'
+    );
+    return [];
+  }
 };
 
 /**
@@ -1540,14 +1581,30 @@ export const enrichSleepSessions = async (
     const firstDay = days[0].split('-').map(Number);
     const lastDay = days[days.length - 1].split('-').map(Number);
 
+    let granted: ReadonlySet<string> = new Set();
+    try {
+      granted = new Set(
+        (await getGrantedPermissions())
+          .filter((p) => p.accessType === 'read')
+          .map((p) => p.recordType)
+      );
+    } catch (error) {
+      addLog(
+        `[HealthConnectService] Sleep HRV/RHR enrichment skipped, permissions unavailable: ${getErrorMessage(error)}`,
+        'DEBUG'
+      );
+    }
+
     const [hrvRecords, rhrRecords] = await Promise.all([
       readOptionalSleepBiometric(
         'HeartRateVariabilityRmssd',
+        granted,
         new Date(minStartMs),
         new Date(maxEndMs)
       ),
       readOptionalSleepBiometric(
         'RestingHeartRate',
+        granted,
         new Date(firstDay[0], firstDay[1] - 1, firstDay[2], 0, 0, 0, 0),
         new Date(lastDay[0], lastDay[1] - 1, lastDay[2], 23, 59, 59, 999)
       ),
