@@ -52,6 +52,7 @@ import {
   hasShownCheckinReminderOffer,
   markCheckinReminderOfferShown,
 } from '../services/checkinReminderOffer';
+import { addLog } from '../services/LogService';
 import { requestNotificationPermission } from '../services/notifications';
 import { useAppPreferencesStore } from '../stores/appPreferencesStore';
 import { getDeviceTimezone, getTodayDate } from '../utils/dateUtils';
@@ -270,7 +271,7 @@ function LegacyMoodLog({
   const entryReady = !entryLoading && !entryError;
 
   // Offered once per device after a check-in, only when the master toggle is
-  // on and reminders are off. Never blocks navigation.
+  // on and reminders are off. Runs after goBack and never blocks navigation.
   const offerCheckinReminders = async () => {
     const prefs = useAppPreferencesStore.getState();
     if (!prefs.notificationsEnabled || prefs.checkinRemindersEnabled) return;
@@ -290,10 +291,17 @@ function LegacyMoodLog({
         {
           text: t('mood.reminderOfferAccept', { defaultValue: 'Remind me' }),
           onPress: async () => {
-            if ((await requestNotificationPermission()) === 'granted') {
-              const store = useAppPreferencesStore.getState();
-              store.setCheckinReminderTimes(['20:30']);
-              store.setCheckinRemindersEnabled(true);
+            try {
+              if ((await requestNotificationPermission()) === 'granted') {
+                const store = useAppPreferencesStore.getState();
+                store.setCheckinReminderTimes(['20:30']);
+                store.setCheckinRemindersEnabled(true);
+              }
+            } catch (error) {
+              addLog(
+                `[Mood] Check-in reminder opt-in failed: ${error}`,
+                'WARNING'
+              );
             }
           },
         },
@@ -325,8 +333,10 @@ function LegacyMoodLog({
         }),
       });
     }
-    await offerCheckinReminders();
     navigation.goBack();
+    offerCheckinReminders().catch((error) =>
+      addLog(`[Mood] Check-in reminder offer failed: ${error}`, 'WARNING')
+    );
   };
 
   return (
