@@ -104,6 +104,7 @@ const devAndroidPermissions = [
   'android.permission.health.WRITE_LEAN_BODY_MASS',
   'android.permission.health.WRITE_INTERMENSTRUAL_BLEEDING',
   'android.permission.health.WRITE_MENSTRUATION',
+  'android.permission.health.WRITE_MINDFULNESS',
   'android.permission.health.WRITE_OVULATION_TEST',
   'android.permission.health.WRITE_OXYGEN_SATURATION',
   'android.permission.health.WRITE_POWER',
