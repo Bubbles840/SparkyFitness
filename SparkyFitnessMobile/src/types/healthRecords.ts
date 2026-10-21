@@ -1,6 +1,7 @@
 import { HealthMetric } from '../HealthMetrics';
 import { SleepStageEvent } from './mobileHealthData';
 import type { RecordSyncError } from '../services/api/healthDataApi';
+import type { MindfulnessSessionType } from '@workspace/shared';
 
 // ==========================================
 // RAW INPUT TYPES (for aggregation functions)
@@ -302,12 +303,32 @@ export interface TransformedNutritionEntry extends RecordTimezoneMetadata {
   caffeine_mg?: number;
 }
 
+/**
+ * A Health Connect mindfulness session (Medito and the like), uploaded as one
+ * SparkyFitness mindfulness session. The server upserts on source + source_id
+ * and dates it from `timestamp` plus the offset metadata.
+ */
+export interface TransformedMindfulnessSession extends RecordTimezoneMetadata {
+  type: 'MindfulnessSession';
+  source: typeof HEALTH_CONNECT_SOURCE;
+  /** Health Connect's own record id. */
+  source_id: string;
+  /** The session's start instant. */
+  timestamp: string;
+  startTime: string;
+  endTime: string;
+  duration_seconds: number;
+  session_type: MindfulnessSessionType;
+  notes?: string;
+}
+
 /** Union type for all possible transform outputs */
 export type TransformOutput =
   | TransformedRecord
   | AggregatedSleepSession
   | TransformedExerciseSession
-  | TransformedNutritionEntry;
+  | TransformedNutritionEntry
+  | TransformedMindfulnessSession;
 
 // ==========================================
 // SYNC RESULT TYPES (Phase 5)

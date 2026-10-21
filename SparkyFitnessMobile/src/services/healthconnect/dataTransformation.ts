@@ -1,7 +1,9 @@
 import { addLog } from '../LogService';
 import { attachWorkoutTelemetry } from '../shared/workoutTelemetryPayload';
+import type { MindfulnessSessionType } from '@workspace/shared';
 import {
   TransformedExerciseSession,
+  TransformedMindfulnessSession,
   TransformedNutritionEntry,
   SparkyMealType,
   AggregatedSleepSession,
@@ -574,7 +576,48 @@ const extractEnergyKcal = (
   return kcal != null && kcal > 0 ? tidyNumber(kcal) : undefined;
 };
 
+/** Health Connect's MindfulnessSessionType codes, as SparkyFitness session types. */
+const HC_MINDFULNESS_SESSION_TYPES: Record<number, MindfulnessSessionType> = {
+  1: 'meditation',
+  2: 'breathwork',
+  5: 'unguided',
+};
+
 const DIRECT_TRANSFORMERS: Record<string, DirectTransformer> = {
+  MindfulnessSession: (rec, _record, _metricConfig, output) => {
+    const startTime = rec.startTime;
+    const endTime = rec.endTime;
+    if (typeof startTime !== 'string' || typeof endTime !== 'string') return;
+    const durationMs = Date.parse(endTime) - Date.parse(startTime);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+    // The server upserts on HC's stable id; without it every sync would add
+    // the session again.
+    const metadata = rec.metadata as { id?: string } | undefined;
+    if (!metadata?.id) return;
+
+    const hcType = rec.mindfulnessSessionType;
+    const title = typeof rec.title === 'string' ? rec.title.trim() : '';
+    const notes = typeof rec.notes === 'string' ? rec.notes.trim() : '';
+    const joinedNotes = [title, notes].filter(Boolean).join(' — ');
+
+    const session: TransformedMindfulnessSession = {
+      type: 'MindfulnessSession',
+      source: HEALTH_CONNECT_SOURCE,
+      source_id: metadata.id,
+      // No day string: the server derives the day from this instant + offset.
+      timestamp: startTime,
+      startTime,
+      endTime,
+      duration_seconds: Math.round(durationMs / 1000),
+      session_type:
+        (typeof hcType === 'number' && HC_MINDFULNESS_SESSION_TYPES[hcType]) ||
+        'other',
+      ...(joinedNotes && { notes: joinedNotes }),
+      ...extractTimezoneMetadata(rec),
+    };
+    output.push(session);
+  },
+
   Nutrition: (rec, _record, _metricConfig, output) => {
     if (!rec.startTime) return;
     if (isOwnRecord(rec)) return; // don't re-import nutrition Sparky wrote

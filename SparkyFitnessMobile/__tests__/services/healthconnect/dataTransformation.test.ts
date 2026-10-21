@@ -2503,3 +2503,87 @@ describe('own-app exclusion (writeback feedback-loop guard)', () => {
     expect(result).toHaveLength(1);
   });
 });
+
+describe('MindfulnessSession records', () => {
+  const cfg = {
+    recordType: 'MindfulnessSession',
+    unit: 'min',
+    type: 'MindfulnessSession',
+  };
+  const rec = (over: Record<string, unknown> = {}) => ({
+    startTime: '2026-10-20T14:30:00.000Z',
+    endTime: '2026-10-20T14:45:00.000Z',
+    startZoneOffset: { totalSeconds: 32400 },
+    mindfulnessSessionType: 1,
+    title: 'Body scan',
+    metadata: { id: 'hc-1' },
+    ...over,
+  });
+
+  test('uploads one session with its instant, offset, duration and type', () => {
+    const [session] = transformHealthRecords([rec()], cfg);
+    expect(session).toEqual(
+      expect.objectContaining({
+        type: 'MindfulnessSession',
+        source: 'Health Connect',
+        source_id: 'hc-1',
+        timestamp: '2026-10-20T14:30:00.000Z',
+        startTime: '2026-10-20T14:30:00.000Z',
+        endTime: '2026-10-20T14:45:00.000Z',
+        duration_seconds: 900,
+        session_type: 'meditation',
+        record_utc_offset_minutes: 540,
+        notes: 'Body scan',
+      })
+    );
+    // The server dates it from the instant and offset; a day string would
+    // be read as UTC midnight and could shift the day.
+    expect(session).not.toHaveProperty('date');
+    expect(session).not.toHaveProperty('entry_date');
+  });
+
+  test.each([
+    [1, 'meditation'],
+    [2, 'breathwork'],
+    [5, 'unguided'],
+    [0, 'other'],
+    [3, 'other'],
+    [4, 'other'],
+    [99, 'other'],
+  ])('maps Health Connect type %i to %s', (hcType, expected) => {
+    const [session] = transformHealthRecords(
+      [rec({ mindfulnessSessionType: hcType })],
+      cfg
+    );
+    expect(session).toEqual(
+      expect.objectContaining({ session_type: expected })
+    );
+  });
+
+  test('skips records without a Health Connect id, times, or a positive duration', () => {
+    expect(
+      transformHealthRecords(
+        [
+          rec({ metadata: {} }),
+          rec({ startTime: undefined }),
+          rec({ endTime: 'not a time' }),
+          rec({ endTime: '2026-10-20T14:30:00.000Z' }),
+          rec({ endTime: '2026-10-20T14:00:00.000Z' }),
+        ],
+        cfg
+      )
+    ).toEqual([]);
+  });
+
+  test('joins title and notes, and leaves notes out when neither exists', () => {
+    const [withBoth] = transformHealthRecords([rec({ notes: 'calm' })], cfg);
+    expect(withBoth).toEqual(
+      expect.objectContaining({ notes: 'Body scan — calm' })
+    );
+    const [withNeither] = transformHealthRecords(
+      [rec({ title: undefined })],
+      cfg
+    );
+    expect(withNeither).not.toHaveProperty('notes');
+  });
+});
