@@ -2531,6 +2531,9 @@ describe('MindfulnessSession records', () => {
         startTime: '2026-10-20T14:30:00.000Z',
         endTime: '2026-10-20T14:45:00.000Z',
         duration_seconds: 900,
+        // Minutes too: servers that predate accepting a duration-only
+        // session reject an entry without a value.
+        value: 15,
         session_type: 'meditation',
         record_utc_offset_minutes: 540,
         notes: 'Body scan',

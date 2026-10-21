@@ -609,6 +609,7 @@ const DIRECT_TRANSFORMERS: Record<string, DirectTransformer> = {
       startTime,
       endTime,
       duration_seconds: Math.round(durationMs / 1000),
+      value: Math.round(durationMs / 600) / 100,
       session_type:
         (typeof hcType === 'number' && HC_MINDFULNESS_SESSION_TYPES[hcType]) ||
         'other',

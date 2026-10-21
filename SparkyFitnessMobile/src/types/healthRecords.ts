@@ -318,6 +318,12 @@ export interface TransformedMindfulnessSession extends RecordTimezoneMetadata {
   startTime: string;
   endTime: string;
   duration_seconds: number;
+  /**
+   * The same duration in minutes. Servers that predate accepting a
+   * duration-only session reject an entry without a value; newer ones read
+   * duration_seconds first.
+   */
+  value: number;
   session_type: MindfulnessSessionType;
   notes?: string;
 }
