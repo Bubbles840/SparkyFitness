@@ -417,6 +417,22 @@ const ALL_HEALTH_METRICS: HealthMetric[] = [
     category: 'Vitals',
     aggregationStrategy: 'min-max-avg',
   },
+  {
+    // Meditation and breathing sessions apps like Medito write to Health
+    // Connect, uploaded one session each (raw read, no day aggregation).
+    id: 'mindfulness',
+    labelKey: 'healthMetrics.mindfulness',
+    defaultLabel: 'Mindfulness',
+    stateKey: 'isMindfulnessSyncEnabled',
+    preferenceKey: 'syncMindfulnessEnabled',
+    recordType: 'MindfulnessSession',
+    unit: 'min',
+    icon: require('../assets/icons/health-metrics/stress.png'),
+    permissions: [{ accessType: 'read', recordType: 'MindfulnessSession' }],
+    type: 'MindfulnessSession',
+    platforms: ['android'],
+    category: 'Vitals',
+  },
 
   {
     id: 'vo2Max',

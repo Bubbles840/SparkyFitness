@@ -79,3 +79,32 @@ describe('HEALTH_METRICS', () => {
     );
   });
 });
+
+describe('Android mindfulness metric', () => {
+  test('registers Android mindfulness as a raw read with its own read permission', () => {
+    // HEALTH_METRICS filters by platform when the module loads, so load a
+    // fresh copy with the fresh react-native it sees set to Android.
+    let androidMetrics: typeof HEALTH_METRICS = [];
+    jest.isolateModules(() => {
+      const { Platform } = require('react-native');
+      jest.replaceProperty(Platform, 'OS', 'android');
+      androidMetrics = require('../../src/HealthMetrics').HEALTH_METRICS;
+    });
+
+    const mindfulness = androidMetrics.find(
+      (m) => m.recordType === 'MindfulnessSession'
+    );
+    expect(mindfulness).toEqual(
+      expect.objectContaining({
+        platforms: ['android'],
+        preferenceKey: 'syncMindfulnessEnabled',
+        permissions: [{ accessType: 'read', recordType: 'MindfulnessSession' }],
+      })
+    );
+    expect(metricReadKind(mindfulness!)).toBe('raw');
+    // Not offered on iOS, where HealthKit mindful sessions are not synced.
+    expect(
+      HEALTH_METRICS.find((m) => m.recordType === 'MindfulnessSession')
+    ).toBeUndefined();
+  });
+});

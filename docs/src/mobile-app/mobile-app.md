@@ -34,6 +34,8 @@ The Android version is available as a google play store beta. You can join the b
 
 Overnight HRV and resting heart rate appear on sleep entries when HRV and Resting Heart Rate sync are enabled.
 
+Turn on **Mindfulness** to bring in the meditation and breathing sessions that apps like Medito save to Health Connect. Each session appears as a mindfulness session on the day it started. Syncing again updates it rather than adding a copy.
+
 ## Screenshot (iOS)
 
 ![Mobile App](/appdashboard.png)

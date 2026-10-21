@@ -1,6 +1,6 @@
 # AGENTS.md
 
-_Last updated: 2026-10-20_
+_Last updated: 2026-10-21_
 
 SparkyFitness Mobile is a React Native 0.86 + Expo SDK 57 app for syncing Apple Health / Health Connect data with the SparkyFitness backend, tracking nutrition, hydration, fasting, measurements, exercise, saved foods, meal templates, custom exercises, workout presets, iOS / Android widgets, the active workout HUD, and the Sparky AI chat.
 
@@ -138,6 +138,7 @@ npx expo prebuild --clean
 - iOS HealthKit locked-device failures surface as database-inaccessible warnings. Do not treat these as successful empty reads.
 - `app.config.ts` grants `android.permission.health.READ_HEALTH_DATA_HISTORY` so Android can read data older than 30 days.
 - Health Connect permission migrations belong in `services/shared/healthPermissionMigration.ts`, not UI-only state.
+- Android `MindfulnessSession` (metric `mindfulness`, Health Connect `READ_MINDFULNESS`; Medito and similar apps) is a raw read. The direct transformer in `healthconnect/dataTransformation.ts` sends one `MindfulnessSession` per record with the start instant plus offset (no day string), `duration_seconds`, `value` in minutes (older servers require a value), the mapped `session_type` and `source_id` = Health Connect's record id. The server upserts on provider + that id, so a re-sync never duplicates. iOS mindful sessions are not synced as sessions.
 - Core check-in measurements use `measurementsApi.ts` and `MeasurementsAddScreen`; preserve `upsertCheckIn` omitted-vs-null semantics.
 - "Import Full History" (`ImportHistoryScreen`, reached from `SyncScreen`) is a one-time resumable backfill: `backfillService.ts` walks 30-day day-aligned windows newest-first from start-of-today down to a probe-derived floor (`readEarliestRecord` on both providers), one upload per window, with a per-server checkpoint in `backfillCheckpoint.ts`. It never advances `lastSyncedTime` and never runs writeback; while it runs, `isBackfillRunning()` (autoSyncCoordinator) makes background sync skip.
 - The backfill's metric set is FROZEN in its checkpoint at first run; resume uses the frozen set verbatim and toggle changes require Start Over. Quota exhaustion, locked device, and app-inactive are expected mid-run stops — the checkpoint keeps them resumable.
