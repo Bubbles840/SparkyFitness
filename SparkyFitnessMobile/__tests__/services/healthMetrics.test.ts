@@ -102,6 +102,9 @@ describe('Android mindfulness metric', () => {
       })
     );
     expect(metricReadKind(mindfulness!)).toBe('raw');
+    // Sessions that reach Health Connect late (a meditation entered for
+    // yesterday) are still read by background sync; the upsert keeps it safe.
+    expect(mindfulness!.rollingLookbackDays).toBe(2);
     // Not offered on iOS, where HealthKit mindful sessions are not synced.
     expect(
       HEALTH_METRICS.find((m) => m.recordType === 'MindfulnessSession')

@@ -432,6 +432,9 @@ const ALL_HEALTH_METRICS: HealthMetric[] = [
     type: 'MindfulnessSession',
     platforms: ['android'],
     category: 'Vitals',
+    // A session can reach Health Connect after the fact (entered for
+    // yesterday, or another app syncing late); the upsert makes re-reads safe.
+    rollingLookbackDays: 2,
   },
 
   {
