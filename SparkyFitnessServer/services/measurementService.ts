@@ -317,12 +317,14 @@ async function processHealthData(
   for (const dataEntry of healthDataArray) {
     const { value, type, date, timestamp } = dataEntry;
     // Check for required fields. Note: 'value' is not required for complex types like SleepSession, Stress, Workout.
+    // MindfulnessSession carries duration_seconds, which its handler reads first.
     const complexTypes = [
       'SleepSession',
       'Stress',
       'ExerciseSession',
       'Workout',
       'Nutrition',
+      'MindfulnessSession',
     ];
     const isComplexType = complexTypes.includes(type);
     if (
