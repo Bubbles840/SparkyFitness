@@ -1143,6 +1143,8 @@ export function getHealthMetricLabel(
       return t('healthMetrics.sleepSession', { defaultValue: 'Sleep Session' });
     case 'stress':
       return t('healthMetrics.stress', { defaultValue: 'Stress' });
+    case 'mindfulness':
+      return t('healthMetrics.mindfulness', { defaultValue: 'Mindfulness' });
     case 'basalBodyTemperature':
       return t('healthMetrics.basalBodyTemperature', {
         defaultValue: 'Basal Body Temperature',

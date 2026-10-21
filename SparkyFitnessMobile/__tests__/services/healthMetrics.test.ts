@@ -108,3 +108,24 @@ describe('Android mindfulness metric', () => {
     ).toBeUndefined();
   });
 });
+
+describe('getHealthMetricLabel', () => {
+  test('gives every Android and iOS metric its own label, not the generic fallback', () => {
+    const { getHealthMetricLabel } = require('../../src/HealthMetrics');
+    const echoDefault = (_key: string, options: { defaultValue: string }) =>
+      options.defaultValue;
+    const metricsFor = (os: 'android' | 'ios') => {
+      let metrics: typeof HEALTH_METRICS = [];
+      jest.isolateModules(() => {
+        const { Platform } = require('react-native');
+        jest.replaceProperty(Platform, 'OS', os);
+        metrics = require('../../src/HealthMetrics').HEALTH_METRICS;
+      });
+      return metrics;
+    };
+    const unlabelled = [...metricsFor('android'), ...metricsFor('ios')]
+      .filter((m) => getHealthMetricLabel(echoDefault, m) === 'Health metric')
+      .map((m) => m.id);
+    expect(unlabelled).toEqual([]);
+  });
+});
