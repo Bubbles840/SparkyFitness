@@ -65,6 +65,30 @@ describe('seedHealthData.ts (Android)', () => {
     });
   });
 
+  describe('mindfulness sessions', () => {
+    test('seeds one 15-minute meditation session per day and asks to write them', async () => {
+      await seedService.seedHealthData(3);
+
+      expect(mockRequestPermission).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          { accessType: 'write', recordType: 'MindfulnessSession' },
+        ])
+      );
+      const sessions = mockInsertRecords.mock.calls
+        .flatMap(([records]) => records)
+        .filter(
+          (r: { recordType: string }) => r.recordType === 'MindfulnessSession'
+        );
+      expect(sessions).toHaveLength(3);
+      for (const session of sessions) {
+        expect(session.mindfulnessSessionType).toBe(1);
+        expect(
+          Date.parse(session.endTime) - Date.parse(session.startTime)
+        ).toBe(15 * 60 * 1000);
+      }
+    });
+  });
+
   describe('permission handling', () => {
     test('returns error when permissions not granted', async () => {
       mockRequestPermission.mockResolvedValue([]);

@@ -912,6 +912,25 @@ const seedSleepSession = async (dates: Date[]): Promise<number> => {
   return totalRecords;
 };
 
+/** One 15-minute meditation (Health Connect type 1) per day, at 07:00. */
+const seedMindfulnessSessions = async (dates: Date[]): Promise<number> => {
+  const records = dates.map((date) => {
+    const startTime = new Date(date);
+    startTime.setHours(getSafeHour(date, 7), 0, 0, 0);
+    const endTime = new Date(startTime.getTime() + 15 * 60 * 1000);
+    return {
+      recordType: 'MindfulnessSession' as const,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      mindfulnessSessionType: 1,
+      title: 'Seeded meditation',
+    };
+  });
+  if (records.length === 0) return 0;
+  await insertRecords(records as Parameters<typeof insertRecords>[0]);
+  return records.length;
+};
+
 const seedNutrition = async (dates: Date[]): Promise<number> => {
   const records = [];
 
@@ -1168,6 +1187,11 @@ const SEED_CONFIGS: SeedConfig[] = [
   { recordType: 'Hydration', seedType: 'custom', seeder: seedHydration },
   { recordType: 'SleepSession', seedType: 'custom', seeder: seedSleepSession },
   { recordType: 'Nutrition', seedType: 'custom', seeder: seedNutrition },
+  {
+    recordType: 'MindfulnessSession',
+    seedType: 'custom',
+    seeder: seedMindfulnessSessions,
+  },
 ];
 
 // ============================================================================
