@@ -27,6 +27,12 @@ jest.mock('../../../src/services/api/healthDataApi', () => ({
 jest.mock('../../../src/services/api/measurementsApi', () => ({
   serverSupportsPerRecordWater: jest.fn().mockResolvedValue(true),
 }));
+jest.mock('../../../src/services/api/mindfulnessApi', () => ({
+  serverSupportsMindfulnessSessions: jest.fn().mockResolvedValue(true),
+}));
+const mindfulnessApi = require('../../../src/services/api/mindfulnessApi') as {
+  serverSupportsMindfulnessSessions: jest.Mock;
+};
 
 const api = require('../../../src/services/api/healthDataApi') as {
   syncHealthData: jest.Mock;
@@ -1000,6 +1006,69 @@ describe('sessionTelemetryOutcomesUsable', () => {
   test('a run with no session metric has nothing staged to withhold', () => {
     expect(sessionTelemetryOutcomesUsable([outcome('Steps', 'rejected')])).toBe(
       true
+    );
+  });
+});
+
+describe('collectHealthData with Health Connect mindfulness', () => {
+  const mindfulness = metric({
+    recordType: 'MindfulnessSession',
+    type: 'MindfulnessSession',
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('skips mindfulness without reading it when the server has no mindfulness sessions', async () => {
+    // Such a server files unknown types as custom measurements, so sending
+    // the sessions would leave junk categories behind.
+    mindfulnessApi.serverSupportsMindfulnessSessions.mockResolvedValue(false);
+    const provider = fakeProvider({
+      readRaw: jest.fn().mockResolvedValue({ records: [{}] }),
+    });
+
+    const outcomes = await collectHealthData(provider, [mindfulness], windows, {
+      timeoutLabelPrefix: 'Test query',
+      telemetry: createTelemetryRunContext(),
+    });
+
+    expect(provider.readRaw).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({ status: 'fulfilled', data: [] }),
+    ]);
+    expect(outcomes[0].error).toBeUndefined();
+  });
+
+  test('reads mindfulness when the server supports it, and only probes for runs that include it', async () => {
+    mindfulnessApi.serverSupportsMindfulnessSessions.mockResolvedValue(true);
+    const provider = fakeProvider();
+
+    await collectHealthData(
+      provider,
+      [metric({ recordType: 'Steps' })],
+      windows,
+      {
+        timeoutLabelPrefix: 'Test query',
+        telemetry: createTelemetryRunContext(),
+      }
+    );
+    expect(
+      mindfulnessApi.serverSupportsMindfulnessSessions
+    ).not.toHaveBeenCalled();
+
+    await collectHealthData(provider, [mindfulness], windows, {
+      timeoutLabelPrefix: 'Test query',
+      telemetry: createTelemetryRunContext(),
+    });
+    expect(
+      mindfulnessApi.serverSupportsMindfulnessSessions
+    ).toHaveBeenCalledTimes(1);
+    expect(provider.readRaw).toHaveBeenCalledWith(
+      'MindfulnessSession',
+      expect.any(Date),
+      windows.end,
+      expect.anything()
     );
   });
 });

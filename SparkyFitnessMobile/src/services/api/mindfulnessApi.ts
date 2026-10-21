@@ -1,4 +1,6 @@
 import { apiFetch } from './apiClient';
+import { ApiError } from './errors';
+import { getTodayDate } from '../../utils/dateUtils';
 import type {
   CreateMindfulnessSessionBody,
   MindfulnessSessionResponse,
@@ -17,6 +19,29 @@ export const fetchMindfulnessDaySummary = (
     serviceName: 'Mindfulness API',
     operation: 'fetch day summary',
   });
+};
+
+let lastMindfulnessSupport: boolean | null = null;
+
+/**
+ * Whether the active server keeps mindfulness sessions. Servers before the
+ * mindfulness feature have no such route (404) and file an unknown health
+ * type as a custom measurement, so synced sessions would land there as junk
+ * categories. On any other failure the last answer is reused, and a first
+ * failure assumes support (current servers), as the water probe does.
+ */
+export const serverSupportsMindfulnessSessions = async (): Promise<boolean> => {
+  try {
+    await fetchMindfulnessDaySummary(getTodayDate());
+    lastMindfulnessSupport = true;
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) {
+      lastMindfulnessSupport = false;
+    } else if (lastMindfulnessSupport === null) {
+      return true;
+    }
+  }
+  return lastMindfulnessSupport;
 };
 
 export const updateMindfulnessSession = (

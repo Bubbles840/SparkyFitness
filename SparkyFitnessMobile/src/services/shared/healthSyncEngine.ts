@@ -19,6 +19,7 @@ import { markEnrichedSessions } from './enrichedSessionCache';
 import { addLog } from '../LogService';
 import { aggregateByDay } from './dataAggregation';
 import { serverSupportsPerRecordWater } from '../api/measurementsApi';
+import { serverSupportsMindfulnessSessions } from '../api/mindfulnessApi';
 import {
   runTasksInBatches,
   TimeoutError,
@@ -288,6 +289,21 @@ export const collectHealthData = async (
     ? !(await serverSupportsPerRecordWater())
     : false;
 
+  // Probed once per run, and only when Health Connect mindfulness is enabled:
+  // a server without mindfulness sessions would file them as junk custom
+  // measurements, so the metric is skipped there without reading it.
+  const skipMindfulness = metrics.some(
+    (m) => m.recordType === 'MindfulnessSession'
+  )
+    ? !(await serverSupportsMindfulnessSessions())
+    : false;
+  if (skipMindfulness) {
+    addLog(
+      '[HealthSync] Skipping mindfulness sessions: the server does not support them yet.',
+      'WARNING'
+    );
+  }
+
   if (telemetry.interactive && provider.prepareInteractiveRead) {
     await provider.prepareInteractiveRead(metrics, windows, telemetry);
   }
@@ -296,11 +312,19 @@ export const collectHealthData = async (
     metrics,
     METRIC_FETCH_CONCURRENCY,
     (metric) =>
-      withTimeout(
-        collectMetric(provider, metric, windows, waterFallbackToSum, telemetry),
-        opts.timeoutMs ?? METRIC_TIMEOUT_MS,
-        `${opts.timeoutLabelPrefix} for ${metric.recordType}`
-      ),
+      skipMindfulness && metric.recordType === 'MindfulnessSession'
+        ? Promise.resolve<CollectedMetric>({ data: [] })
+        : withTimeout(
+            collectMetric(
+              provider,
+              metric,
+              windows,
+              waterFallbackToSum,
+              telemetry
+            ),
+            opts.timeoutMs ?? METRIC_TIMEOUT_MS,
+            `${opts.timeoutLabelPrefix} for ${metric.recordType}`
+          ),
     {
       stopOnError: (error) => error instanceof TimeoutError,
     }
